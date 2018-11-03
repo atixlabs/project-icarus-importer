@@ -34,6 +34,7 @@ import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL)
 import           Pos.Core.Txp (Tx (..), TxId, TxOut (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (hash)
 import           Pos.Binary.Class (serialize')
+import           Serokell.Util.Base16 as SB16
 
 -- txTimestamp corresponds to the trTimestamp
 data TxRecord = TxRecord
@@ -142,7 +143,7 @@ getTxByHash txHash conn = do
       pure $ TxRecord txHash inputs outputs blkNum time txState
     _ -> Nothing
     where txByHashQuery = proc () -> do
-            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ <- (selectTable txsTable) -< ()
+            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ <- (selectTable txsTable) -< ()
             restrict -< rowTxHash .== (pgString $ hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
@@ -238,6 +239,7 @@ upsertTxToHistory tx TxExtra{..} blockHeight txState conn = do
                 , trTimestamp     = maybeToNullable $ timestampToPGTime <$> teTimestamp
                 , trState         = pgString $ show txState
                 , trLastUpdate    = pgUTCTime currentTime
+                , trRawBody       = toNullable . pgString. toString . serialize' $ tx
                 }
     timestampToPGTime = pgUTCTime . (^. timestampToUTCTimeL)
 
@@ -246,3 +248,7 @@ currentTxExtra txUndo = do
   currentTime <- getCurrentTime
   let currentTimestamp = currentTime ^. from timestampToUTCTimeL
   pure $ TxExtra (Just currentTimestamp) txUndo
+
+-- | A required instance for decoding.
+instance ToString ByteString where
+  toString = toString . SB16.encode
