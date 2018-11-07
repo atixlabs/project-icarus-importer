@@ -17,6 +17,7 @@ CREATE TABLE txs 	( hash		          text      PRIMARY KEY
         					, time              timestamp with time zone NULL
                   , tx_state          text      DEFAULT true
                   , last_update       timestamp with time zone
+                  , tx_body           text      DEFAULT NULL
                   );
 
 CREATE TABLE tx_addresses ( tx_hash  text     REFERENCES txs ON DELETE CASCADE
