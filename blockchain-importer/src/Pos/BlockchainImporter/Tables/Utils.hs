@@ -33,6 +33,8 @@ import           Pos.Txp.Toil.Types ()
 hashToString :: AbstractHash algo a -> String
 hashToString h = toString $ sformat hashHexF h
 
+-- We can't store addresses longer than 2K symbols in Pgs because of indexes.
+-- And there are mainnet transactions with addresses up to 10501 symbols long
 cutDownLongAddress :: String -> String
 cutDownLongAddress = take 2000
 
