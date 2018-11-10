@@ -33,6 +33,8 @@ import           Pos.BlockchainImporter.Tables.Utils
 import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL)
 import           Pos.Core.Txp (Tx (..), TxId, TxOut (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (hash)
+import           Pos.Binary.Class (serialize')
+import           Serokell.Util.Base16 as SB16
 
 -- txTimestamp corresponds to the trTimestamp
 data TxRecord = TxRecord
@@ -84,7 +86,7 @@ data TxState  = Successful
     Both are needed, as trTimestap is the one the user is interested of knowing, while
     trLastUpdate is used for fetching those events
 -}
-data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last = TxRow  { trHash          :: h
+data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw = TxRow  { trHash          :: h
                                                                     , trInputsAddr    :: iAddrs
                                                                     , trInputsAmount  :: iAmts
                                                                     , trOutputsAddr   :: oAddrs
@@ -93,6 +95,7 @@ data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last = TxRow  { trHash    
                                                                     , trTimestamp     :: t
                                                                     , trState         :: state
                                                                     , trLastUpdate    :: last
+                                                                    , trRawBody       :: raw
                                                                     } deriving (Show)
 
 type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
@@ -104,6 +107,7 @@ type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
                           (Column (Nullable PGTimestamptz)) -- Timestamp tx moved to current state
                           (Column PGText)                   -- Tx state
                           (Column PGTimestamptz)            -- Timestamp of the last update
+                          (Column (Nullable PGText))        -- Raw TX body
 
 $(makeAdaptorAndInstance "pTxs" ''TxRowPoly)
 
@@ -117,6 +121,7 @@ txsTable = Table "txs" (pTxs TxRow  { trHash            = required "hash"
                                     , trTimestamp       = required "time"
                                     , trState           = required "tx_state"
                                     , trLastUpdate      = required "last_update"
+                                    , trRawBody         = required "tx_body"
                                     })
 
 
@@ -138,7 +143,7 @@ getTxByHash txHash conn = do
       pure $ TxRecord txHash inputs outputs blkNum time txState
     _ -> Nothing
     where txByHashQuery = proc () -> do
-            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ <- (selectTable txsTable) -< ()
+            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ <- (selectTable txsTable) -< ()
             restrict -< rowTxHash .== (pgString $ hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
@@ -234,6 +239,7 @@ upsertTxToHistory tx TxExtra{..} blockHeight txState conn = do
                 , trTimestamp     = maybeToNullable $ timestampToPGTime <$> teTimestamp
                 , trState         = pgString $ show txState
                 , trLastUpdate    = pgUTCTime currentTime
+                , trRawBody       = toNullable . pgString. toString . serialize' $ tx
                 }
     timestampToPGTime = pgUTCTime . (^. timestampToUTCTimeL)
 
@@ -242,3 +248,7 @@ currentTxExtra txUndo = do
   currentTime <- getCurrentTime
   let currentTimestamp = currentTime ^. from timestampToUTCTimeL
   pure $ TxExtra (Just currentTimestamp) txUndo
+
+-- | A required instance for decoding.
+instance ToString ByteString where
+  toString = toString . SB16.encode
