@@ -12,6 +12,7 @@ import           Pos.Core (BlockCount, ComponentBlock (..), HasConfiguration, Ha
                            HeaderHash, SlotId (..), difficultyL, epochIndexL, getChainDifficulty,
                            headerHash, headerSlotL)
 import           Pos.Core.Txp (TxAux, TxUndo)
+import           Pos.Crypto.Hashing (AbstractHash (..))
 import           Pos.DB (MonadDBRead, SomeBatchOp (..))
 import           Pos.Slotting (getSlotStart)
 import           Pos.Txp (ProcessBlundsSettings (..), TxpBlock, TxpBlund, TxpGlobalApplyMode,
@@ -20,7 +21,6 @@ import           Pos.Txp (ProcessBlundsSettings (..), TxpBlock, TxpBlund, TxpGlo
 import           Pos.Txp.Settings (IsNewEpochOperation)
 import           Pos.Txp.Toil
 import           Pos.Util.Chrono (NewestFirst (..))
-import           Pos.Util.Some (applySome)
 
 import           Pos.BlockchainImporter.Configuration (HasPostGresDB, withPostGreTransactionM)
 import           Pos.BlockchainImporter.Txp.Toil (BlockchainImporterExtraModifier (..),
@@ -76,8 +76,9 @@ applySingle isNewEpoch txpBlund = do
     -- type TxpBlock = ComponentBlock TxPayload
 
     let txpBlock = txpBlund ^. _1
-    let (slotId, maybeBlockHeight, maybeHash) = getBlockSlotAndHeight txpBlock
-    logInfo $ sformat (">>>>> TXP_HASH: "%shown) maybeHash
+    let (slotId, maybeBlockHeight) = getBlockSlotAndHeight txpBlock
+    let (AbstractHash h) = headerHash txpBlock
+    logInfo $ sformat (">>>>> TXP_HASH: "%shown) h
 
     -- Get the timestamp from that information.
     mTxTimestamp <- getSlotStart slotId
@@ -90,7 +91,7 @@ rollbackSingle ::
     => IsNewEpochOperation -> TxpBlund -> m (EGlobalToilM ())
 rollbackSingle isNewEpoch txpBlund =
   let txpBlock         = txpBlund ^. _1
-      (_, maybeBlockHeight, _) = getBlockSlotAndHeight txpBlock
+      (_, maybeBlockHeight) = getBlockSlotAndHeight txpBlock
       txAuxesAndUndos  = blundToAuxNUndo txpBlund
   in eRollbackToil isNewEpoch txAuxesAndUndos maybeBlockHeight
 
@@ -106,7 +107,7 @@ blundToAuxNUndoWHash blund@(blk, _) =
     (blundToAuxNUndo blund, headerHash blk)
 
 -- Returns no chain difficulty if the passed block is a genesis
-getBlockSlotAndHeight :: HasProtocolConstants => TxpBlock -> (SlotId, Maybe BlockCount, Maybe HeaderHash)
+getBlockSlotAndHeight :: HasProtocolConstants => TxpBlock -> (SlotId, Maybe BlockCount)
 getBlockSlotAndHeight txpBlock = case txpBlock of
   ComponentBlockGenesis genesisBlock ->
       ( SlotId
@@ -115,12 +116,10 @@ getBlockSlotAndHeight txpBlock = case txpBlock of
             -- Genesis block doesn't have a slot, set to minBound
             }
       , Nothing
-      , Nothing
       )
   ComponentBlockMain mainHeader _  ->
       ( mainHeader ^. headerSlotL
       , -- Currently the chain difficulty is the number of the block, if that definition changes,
         -- this should also as well
         Just $ getChainDifficulty $ mainHeader ^. difficultyL
-      , Just $ applySome headerHash mainHeader
       )
