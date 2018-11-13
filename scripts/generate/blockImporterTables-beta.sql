@@ -14,6 +14,7 @@ CREATE TABLE txs 	( hash		          text      PRIMARY KEY
         					, outputs_address   text[]
                   , outputs_amount    bigint[]
         					, block_num         bigint    NULL
+                  , block_hash        text      NULL
         					, time              timestamp with time zone NULL
                   , tx_state          text      DEFAULT true
                   , last_update       timestamp with time zone

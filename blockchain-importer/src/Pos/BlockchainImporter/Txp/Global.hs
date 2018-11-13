@@ -5,14 +5,11 @@ module Pos.BlockchainImporter.Txp.Global
        ) where
 
 import           Universum
-import           System.Wlog (logInfo)
-import           Formatting (sformat, shown, (%))
 
 import           Pos.Core (BlockCount, ComponentBlock (..), HasConfiguration, HasProtocolConstants,
                            HeaderHash, SlotId (..), difficultyL, epochIndexL, getChainDifficulty,
                            headerHash, headerSlotL)
 import           Pos.Core.Txp (TxAux, TxUndo)
-import           Pos.Crypto.Hashing (AbstractHash (..))
 import           Pos.DB (MonadDBRead, SomeBatchOp (..))
 import           Pos.Slotting (getSlotStart)
 import           Pos.Txp (ProcessBlundsSettings (..), TxpBlock, TxpBlund, TxpGlobalApplyMode,
@@ -77,14 +74,12 @@ applySingle isNewEpoch txpBlund = do
 
     let txpBlock = txpBlund ^. _1
     let (slotId, maybeBlockHeight) = getBlockSlotAndHeight txpBlock
-    let (AbstractHash h) = headerHash txpBlock
-    logInfo $ sformat (">>>>> TXP_HASH: "%shown) h
 
     -- Get the timestamp from that information.
     mTxTimestamp <- getSlotStart slotId
 
-    let (txAuxesAndUndos, _) = blundToAuxNUndoWHash txpBlund
-    eApplyToil isNewEpoch mTxTimestamp txAuxesAndUndos maybeBlockHeight
+    let (txAuxesAndUndos, hash) = blundToAuxNUndoWHash txpBlund
+    eApplyToil isNewEpoch mTxTimestamp txAuxesAndUndos maybeBlockHeight hash
 
 rollbackSingle ::
        forall m. (HasConfiguration, HasPostGresDB, MonadIO m, MonadDBRead m)

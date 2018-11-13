@@ -30,9 +30,10 @@ import           Opaleye.RunSelect
 import           Pos.BlockchainImporter.Core (TxExtra (..))
 import qualified Pos.BlockchainImporter.Tables.TxAddrTable as TAT (insertTxAddresses)
 import           Pos.BlockchainImporter.Tables.Utils
-import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL)
+import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL, HeaderHash)
 import           Pos.Core.Txp (Tx (..), TxId, TxOut (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (hash)
+import           Pos.Crypto.Hashing (AbstractHash (..))
 import           Pos.Binary.Class (serialize')
 import           Serokell.Util.Base16 as SB16
 
@@ -86,7 +87,8 @@ data TxState  = Successful
     Both are needed, as trTimestap is the one the user is interested of knowing, while
     trLastUpdate is used for fetching those events
 -}
-data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw = TxRow  { trHash          :: h
+data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw bhash = TxRow
+                                                                    { trHash          :: h
                                                                     , trInputsAddr    :: iAddrs
                                                                     , trInputsAmount  :: iAmts
                                                                     , trOutputsAddr   :: oAddrs
@@ -96,6 +98,7 @@ data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw = TxRow  { trHash
                                                                     , trState         :: state
                                                                     , trLastUpdate    :: last
                                                                     , trRawBody       :: raw
+                                                                    , trBlockHash     :: bhash
                                                                     } deriving (Show)
 
 type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
@@ -108,6 +111,7 @@ type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
                           (Column PGText)                   -- Tx state
                           (Column PGTimestamptz)            -- Timestamp of the last update
                           (Column (Nullable PGText))        -- Raw TX body
+                          (Column (Nullable PGText))        -- Block hash
 
 $(makeAdaptorAndInstance "pTxs" ''TxRowPoly)
 
@@ -122,6 +126,7 @@ txsTable = Table "txs" (pTxs TxRow  { trHash            = required "hash"
                                     , trState           = required "tx_state"
                                     , trLastUpdate      = required "last_update"
                                     , trRawBody         = required "tx_body"
+                                    , trBlockHash       = required "block_hash"
                                     })
 
 
@@ -143,7 +148,7 @@ getTxByHash txHash conn = do
       pure $ TxRecord txHash inputs outputs blkNum time txState
     _ -> Nothing
     where txByHashQuery = proc () -> do
-            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ <- (selectTable txsTable) -< ()
+            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ _ <- (selectTable txsTable) -< ()
             restrict -< rowTxHash .== (pgString $ hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
@@ -152,8 +157,9 @@ getTxByHash txHash conn = do
     If the tx was already present with a different state, it is moved to the confirmed one and
     it's timestamp and last update are updated
 -}
-upsertSuccessfulTx :: Tx -> TxExtra -> BlockCount -> PGS.Connection -> IO ()
-upsertSuccessfulTx tx txExtra blockHeight conn = upsertTx tx txExtra (Just blockHeight) Successful conn
+upsertSuccessfulTx :: Tx -> TxExtra -> BlockCount -> HeaderHash -> PGS.Connection -> IO ()
+upsertSuccessfulTx tx txExtra blockHeight headerHash =
+   upsertTx tx txExtra (Just (blockHeight, headerHash)) Successful
 
 {-|
     Inserts a failed tx to the tx history table with the current time as it's timestamp
@@ -211,18 +217,18 @@ deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
 
 -- Inserts a given Tx into the Tx history tables with a given state (overriding any
 -- it if it was already present).
-upsertTx :: Tx -> TxExtra -> Maybe BlockCount -> TxState -> PGS.Connection -> IO ()
-upsertTx tx txExtra maybeBlockHeight succeeded conn = do
-  upsertTxToHistory tx txExtra maybeBlockHeight succeeded conn
+upsertTx :: Tx -> TxExtra -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
+upsertTx tx txExtra maybeBlockHeightAndHash succeeded conn = do
+  upsertTxToHistory tx txExtra maybeBlockHeightAndHash succeeded conn
   TAT.insertTxAddresses tx (teInputOutputs txExtra) conn
 
 -- Inserts the basic info of a given Tx into the master Tx history table (overriding any
 -- it if it was already present)
-upsertTxToHistory :: Tx -> TxExtra -> Maybe BlockCount -> TxState -> PGS.Connection -> IO ()
-upsertTxToHistory tx TxExtra{..} blockHeight txState conn = do
+upsertTxToHistory :: Tx -> TxExtra -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
+upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
   currentTime <- getCurrentTime
   void $ runUpsert_ conn txsTable ["hash"]
-                    ["block_num", "tx_state", "last_update", "time"]
+                    ["block_num", "block_hash", "tx_state", "last_update", "time"]
                     [rowFromLastUpdate currentTime]
   where
     inputs                        = toaOut <$> (catMaybes $ NE.toList $ teInputOutputs)
@@ -234,7 +240,9 @@ upsertTxToHistory tx TxExtra{..} blockHeight txState conn = do
                 , trOutputsAddr   = pgArray (pgString . addressToString . txOutAddress) outputs
                 , trOutputsAmount = pgArray (pgInt8 . coinToInt64 . txOutValue) outputs
                 , trBlockNum      = fromMaybe (Opaleye.null) $
-                                              (toNullable . pgInt8 . fromIntegral) <$> blockHeight
+                                              (toNullable . pgInt8 . fromIntegral . fst) <$> blockHeightAndHash
+                , trBlockHash     = fromMaybe (Opaleye.null) $
+                                              (toNullable . pgString . extractHash . snd) <$> blockHeightAndHash
                   -- FIXME: Tx time should never be None at this stage
                 , trTimestamp     = maybeToNullable $ timestampToPGTime <$> teTimestamp
                 , trState         = pgString $ show txState
@@ -252,3 +260,6 @@ currentTxExtra txUndo = do
 -- | A required instance for decoding.
 instance ToString ByteString where
   toString = toString . SB16.encode
+
+extractHash :: HeaderHash -> String
+extractHash (AbstractHash h) = show h

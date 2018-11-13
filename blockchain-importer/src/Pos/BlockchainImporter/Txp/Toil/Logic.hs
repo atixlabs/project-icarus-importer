@@ -25,7 +25,7 @@ import qualified Pos.BlockchainImporter.Tables.BestBlockTable as BBT
 import qualified Pos.BlockchainImporter.Tables.TxsTable as TxsT
 import qualified Pos.BlockchainImporter.Tables.UtxosTable as UT
 import           Pos.BlockchainImporter.Txp.Toil.Monad (EGlobalToilM, ELocalToilM)
-import           Pos.Core (BlockCount, BlockVersionData, EpochIndex, HasConfiguration, Timestamp)
+import           Pos.Core (BlockCount, BlockVersionData, EpochIndex, HasConfiguration, Timestamp, HeaderHash)
 import           Pos.Core.Txp (Tx (..), TxAux (..), TxId, TxIn (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (WithHash (..), hash)
 import           Pos.DB.Class (MonadDBRead)
@@ -49,10 +49,11 @@ eApplyToil ::
     -> Maybe Timestamp        -- Timestamp of the block
     -> [(TxAux, TxUndo)]      -- Txs of the block
     -> Maybe BlockCount       -- Number of the block, if it's not a genesis
+    -> HeaderHash
     -> m (EGlobalToilM ())
-eApplyToil isNewEpoch mTxTimestamp txun maybeBlockHeight = do
+eApplyToil isNewEpoch mTxTimestamp txun maybeBlockHeight headerHash = do
     -- Genesis block changes don't impact postgresdb
-    whenJust maybeBlockHeight $ eApplyToilPG isNewEpoch mTxTimestamp txun
+    whenJust maybeBlockHeight $ eApplyToilPG isNewEpoch mTxTimestamp txun headerHash
     pure $ extendGlobalToilM $ Txp.applyToil txun
 
 eApplyToilPG ::
@@ -60,9 +61,10 @@ eApplyToilPG ::
   => IsNewEpochOperation
   -> Maybe Timestamp
   -> [(TxAux, TxUndo)]
+  -> HeaderHash
   -> BlockCount
   -> m ()
-eApplyToilPG isNewEpoch mTxTimestamp txun blockHeight = do
+eApplyToilPG isNewEpoch mTxTimestamp txun headerHash blockHeight = do
     -- Update best block
     postgresStoreOnBlockEvent isNewEpoch $
                               BBT.updateBestBlock blockHeight
@@ -80,7 +82,7 @@ eApplyToilPG isNewEpoch mTxTimestamp txun blockHeight = do
             newExtra = TxExtra mTxTimestamp txUndo
 
         postgresStoreOnBlockEvent isNewEpoch $
-                                  TxsT.upsertSuccessfulTx tx newExtra blockHeight
+                                  TxsT.upsertSuccessfulTx tx newExtra blockHeight headerHash
 
 
 -- | Rollback transactions from one block or genesis.
