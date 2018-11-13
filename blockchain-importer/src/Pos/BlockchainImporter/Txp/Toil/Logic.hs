@@ -82,7 +82,7 @@ eApplyToilPG isNewEpoch mTxTimestamp txun headerHash blockHeight = do
             newExtra = TxExtra mTxTimestamp txUndo
 
         postgresStoreOnBlockEvent isNewEpoch $
-                                  TxsT.upsertSuccessfulTx tx newExtra blockHeight headerHash
+                                  TxsT.upsertSuccessfulTx tx newExtra (blockHeight, headerHash)
 
 
 -- | Rollback transactions from one block or genesis.

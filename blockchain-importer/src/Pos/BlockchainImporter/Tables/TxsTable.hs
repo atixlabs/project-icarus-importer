@@ -157,9 +157,9 @@ getTxByHash txHash conn = do
     If the tx was already present with a different state, it is moved to the confirmed one and
     it's timestamp and last update are updated
 -}
-upsertSuccessfulTx :: Tx -> TxExtra -> BlockCount -> HeaderHash -> PGS.Connection -> IO ()
-upsertSuccessfulTx tx txExtra blockHeight headerHash =
-   upsertTx tx txExtra (Just (blockHeight, headerHash)) Successful
+upsertSuccessfulTx :: Tx -> TxExtra -> (BlockCount, HeaderHash) -> PGS.Connection -> IO ()
+upsertSuccessfulTx tx txExtra blockHeightAndHash =
+   upsertTx tx txExtra (Just blockHeightAndHash) Successful
 
 {-|
     Inserts a failed tx to the tx history table with the current time as it's timestamp
@@ -261,5 +261,6 @@ currentTxExtra txUndo = do
 instance ToString ByteString where
   toString = toString . SB16.encode
 
+-- | Extracting actual digest from type-wrapper
 extractHash :: HeaderHash -> String
 extractHash (AbstractHash h) = show h
