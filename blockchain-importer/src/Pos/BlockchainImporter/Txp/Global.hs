@@ -78,8 +78,8 @@ applySingle isNewEpoch txpBlund = do
     -- Get the timestamp from that information.
     mTxTimestamp <- getSlotStart slotId
 
-    let (txAuxesAndUndos, _) = blundToAuxNUndoWHash txpBlund
-    eApplyToil isNewEpoch mTxTimestamp txAuxesAndUndos maybeBlockHeight
+    let (txAuxesAndUndos, hash) = blundToAuxNUndoWHash txpBlund
+    eApplyToil isNewEpoch mTxTimestamp txAuxesAndUndos maybeBlockHeight hash
 
 rollbackSingle ::
        forall m. (HasConfiguration, HasPostGresDB, MonadIO m, MonadDBRead m)
