@@ -151,7 +151,7 @@ getTxByHash txHash conn = do
   txsMatched  :: [(Text, [Text], [Int64], [Text], [Int64], Maybe Int64, Maybe UTCTime, String)]
               <- runSelect conn txByHashQuery
   pure $ case txsMatched of
-    [ ((_, inpAddrs, inpAmounts, outAddrs, outAmounts, blkNum, t, txStateString)) ] -> do
+    [ (_, inpAddrs, inpAmounts, outAddrs, outAmounts, blkNum, t, txStateString) ] -> do
       inputs <- zipWithM toTxOutAux inpAddrs inpAmounts >>= nonEmpty
       outputs <- zipWithM toTxOutAux outAddrs outAmounts >>= nonEmpty
       txState <- readMaybe txStateString
@@ -160,7 +160,7 @@ getTxByHash txHash conn = do
     _ -> Nothing
     where txByHashQuery = proc () -> do
             TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ _ _ _ _ <- (selectTable txsTable) -< ()
-            restrict -< rowTxHash .== (pgString $ hashToString txHash)
+            restrict -< rowTxHash .== pgString (hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
 -- | Returns slot from a latest known tx or (0/0)
@@ -235,7 +235,7 @@ deleteTxsAfterBlk :: BlockCount -> PGS.Connection -> IO ()
 deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
   where deleteAfterBlkQuery = Delete txsTable shouldDeleteTx rCount
         shouldDeleteTx tx   = matchNullable (pgBool False)
-                                            (\txBlkNum -> txBlkNum .> (pgInt8 $ fromIntegral fromBlk))
+                                            (\txBlkNum -> txBlkNum .> pgInt8 (fromIntegral fromBlk))
                                             (trBlockNum tx)
 
 ----------------------------------------------------------------------------
