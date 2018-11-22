@@ -77,15 +77,15 @@ eApplyToilPG isNewEpoch mTxTimestamp txun slot headerHash blockHeight = do
                               UT.applyModifierToUtxos $ applyUTxOModifier txun
 
     -- Update tx history
-    mapM_ applier txun
+    mapM_ applier $ zip [0..] txun
   where
-    applier :: (TxAux, TxUndo) -> m ()
-    applier (txAux, txUndo) = do
+    applier :: (Int, (TxAux, TxUndo)) -> m ()
+    applier (ordinal, (txAux, txUndo)) = do
         let tx = taTx txAux
             newExtra = TxExtra mTxTimestamp txUndo
 
         postgresStoreOnBlockEvent isNewEpoch $
-                                  TxsT.upsertSuccessfulTx tx newExtra slot (blockHeight, headerHash)
+                                  TxsT.upsertSuccessfulTx tx newExtra slot (blockHeight, headerHash) ordinal
 
 
 -- | Rollback transactions from one block or genesis.
