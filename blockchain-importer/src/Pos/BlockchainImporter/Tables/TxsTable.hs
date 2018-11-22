@@ -241,7 +241,7 @@ upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
                     ["block_num", "block_hash", "tx_state", "last_update", "time"]
                     [rowFromLastUpdate currentTime]
   where
-    inputs                        = toaOut <$> (catMaybes $ NE.toList $ teInputOutputs)
+    inputs                        = toaOut <$> catMaybes (NE.toList teInputOutputs)
     outputs                       = NE.toList $ _txOutputs tx
     rowFromLastUpdate currentTime =
           TxRow { trHash          = pgString $ hashToString (hash tx)
@@ -249,10 +249,8 @@ upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
                 , trInputsAmount  = pgArray (pgInt8 . coinToInt64 . txOutValue) inputs
                 , trOutputsAddr   = pgArray (pgString . addressToString . txOutAddress) outputs
                 , trOutputsAmount = pgArray (pgInt8 . coinToInt64 . txOutValue) outputs
-                , trBlockNum      = fromMaybe (Opaleye.null) $
-                                              (toNullable . pgInt8 . fromIntegral . fst) <$> blockHeightAndHash
-                , trBlockHash     = fromMaybe (Opaleye.null) $
-                                              (toNullable . pgString . extractHash . snd) <$> blockHeightAndHash
+                , trBlockNum      = maybeOrNull (pgInt8 . fromIntegral . fst) blockHeightAndHash
+                , trBlockHash     = maybeOrNull (pgString . extractHash . snd) blockHeightAndHash
                   -- FIXME: Tx time should never be None at this stage
                 , trTimestamp     = maybeToNullable $ timestampToPGTime <$> teTimestamp
                 , trState         = pgString $ show txState
@@ -277,3 +275,7 @@ instance ToString ByteString where
 -- | Extracting actual digest from type-wrapper
 extractHash :: HeaderHash -> String
 extractHash (AbstractHash h) = show h
+
+-- | Map a maybe value into a nullable
+maybeOrNull :: (a -> Column b) -> Maybe a -> Column (Nullable b)
+maybeOrNull f = maybe Opaleye.null (toNullable . f)
