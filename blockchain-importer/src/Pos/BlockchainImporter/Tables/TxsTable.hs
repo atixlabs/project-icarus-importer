@@ -30,7 +30,7 @@ import           Opaleye.RunSelect
 import           Pos.BlockchainImporter.Core (TxExtra (..))
 import qualified Pos.BlockchainImporter.Tables.TxAddrTable as TAT (insertTxAddresses)
 import           Pos.BlockchainImporter.Tables.Utils
-import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL, HeaderHash)
+import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL, HeaderHash, SlotId)
 import           Pos.Core.Txp (Tx (..), TxId, TxOut (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (hash)
 import           Pos.Crypto.Hashing (AbstractHash (..))
@@ -116,9 +116,9 @@ type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
                           (Column PGTimestamptz)            -- Timestamp of the last update
                           (Column (Nullable PGText))        -- Raw TX body
                           (Column (Nullable PGText))        -- Block hash
-                          (Column (Nullable PGInt8))        -- Epoch
-                          (Column (Nullable PGInt8))        -- Slot
-                          (Column (Nullable PGInt8))        -- Ordinal
+                          (Column (Nullable PGInt4))        -- Epoch
+                          (Column (Nullable PGInt4))        -- Slot
+                          (Column (Nullable PGInt4))        -- Ordinal
 
 $(makeAdaptorAndInstance "pTxs" ''TxRowPoly)
 
@@ -167,9 +167,9 @@ getTxByHash txHash conn = do
     If the tx was already present with a different state, it is moved to the confirmed one and
     it's timestamp and last update are updated
 -}
-upsertSuccessfulTx :: Tx -> TxExtra -> (BlockCount, HeaderHash) -> PGS.Connection -> IO ()
-upsertSuccessfulTx tx txExtra blockHeightAndHash =
-   upsertTx tx txExtra (Just blockHeightAndHash) Successful
+upsertSuccessfulTx :: Tx -> TxExtra -> SlotId -> (BlockCount, HeaderHash) -> PGS.Connection -> IO ()
+upsertSuccessfulTx tx txExtra slot blockHeightAndHash =
+   upsertTx tx txExtra (Just slot) (Just blockHeightAndHash) Successful
 
 {-|
     Inserts a failed tx to the tx history table with the current time as it's timestamp
@@ -179,7 +179,7 @@ upsertSuccessfulTx tx txExtra blockHeightAndHash =
 upsertFailedTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertFailedTx tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  upsertTx tx txExtra Nothing Failed conn
+  upsertTx tx txExtra Nothing Nothing Failed conn
 
 {-|
     Inserts a pending tx to the tx history table with the current time as it's timestamp
@@ -189,7 +189,7 @@ upsertFailedTx tx txUndo conn = do
 upsertPendingTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertPendingTx tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  upsertTx tx txExtra Nothing Pending conn
+  upsertTx tx txExtra Nothing Nothing Pending conn
 
 {-|
     Marks all pending txs as failed
@@ -227,15 +227,15 @@ deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
 
 -- Inserts a given Tx into the Tx history tables with a given state (overriding any
 -- it if it was already present).
-upsertTx :: Tx -> TxExtra -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
-upsertTx tx txExtra maybeBlockHeightAndHash succeeded conn = do
-  upsertTxToHistory tx txExtra maybeBlockHeightAndHash succeeded conn
+upsertTx :: Tx -> TxExtra -> Maybe SlotId -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
+upsertTx tx txExtra maybeSlot maybeBlockHeightAndHash succeeded conn = do
+  upsertTxToHistory tx txExtra maybeSlot maybeBlockHeightAndHash succeeded conn
   TAT.insertTxAddresses tx (teInputOutputs txExtra) conn
 
 -- Inserts the basic info of a given Tx into the master Tx history table (overriding any
 -- it if it was already present)
-upsertTxToHistory :: Tx -> TxExtra -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
-upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
+upsertTxToHistory :: Tx -> TxExtra-> Maybe SlotId -> Maybe (BlockCount, HeaderHash) -> TxState -> PGS.Connection -> IO ()
+upsertTxToHistory tx TxExtra{..} maybeSlot blockHeightAndHash txState conn = do
   currentTime <- getCurrentTime
   void $ runUpsert_ conn txsTable ["hash"]
                     ["block_num", "block_hash", "tx_state", "last_update", "time"]
@@ -256,8 +256,8 @@ upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
                 , trState         = pgString $ show txState
                 , trLastUpdate    = pgUTCTime currentTime
                 , trRawBody       = toNullable . pgString. toString . serialize' $ tx
-                , trEpoch         = Opaleye.null
-                , trSlot          = Opaleye.null
+                , trEpoch         = maybeOrNull (pgInt4 . slotToEpochInt) maybeSlot
+                , trSlot          = maybeOrNull (pgInt4 . slotToSlotInt) maybeSlot
                 , trOrdinal       = Opaleye.null
                 }
     timestampToPGTime = pgUTCTime . (^. timestampToUTCTimeL)
@@ -276,6 +276,6 @@ instance ToString ByteString where
 extractHash :: HeaderHash -> String
 extractHash (AbstractHash h) = show h
 
--- | Map a maybe value into a nullable
+-- | Map a maybe value into a nullable column
 maybeOrNull :: (a -> Column b) -> Maybe a -> Column (Nullable b)
 maybeOrNull f = maybe Opaleye.null (toNullable . f)

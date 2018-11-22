@@ -6,6 +6,8 @@ module Pos.BlockchainImporter.Tables.Utils
     hashToString
   , addressToString
   , coinToInt64
+  , slotToEpochInt
+  , slotToSlotInt
   , toTxIn
   , toTxOutAux
     -- * Postgres
@@ -20,6 +22,7 @@ import qualified Database.PostgreSQL.Simple as PGS
 import           Formatting (sformat)
 import qualified Opaleye as O
 
+import           Pos.Core (SlotId (..), EpochIndex (..), LocalSlotIndex (..))
 import           Pos.Core.Common (Address, Coin (..), addressF, decodeTextAddress)
 import           Pos.Core.Txp (TxIn (..), TxOut (..), TxOutAux (..))
 import           Pos.Crypto (decodeHash, hashHexF)
@@ -43,6 +46,12 @@ addressToString addr = cutDownLongAddress . toString $ sformat addressF addr
 
 coinToInt64 :: Coin -> Int64
 coinToInt64 = fromIntegral . getCoin
+
+slotToEpochInt :: SlotId -> Int
+slotToEpochInt = fromIntegral . getEpochIndex . siEpoch
+
+slotToSlotInt :: SlotId -> Int
+slotToSlotInt = fromIntegral . getSlotIndex . siSlot
 
 toTxOutAux :: Text -> Int64 -> Maybe TxOutAux
 toTxOutAux receiver amount = do
