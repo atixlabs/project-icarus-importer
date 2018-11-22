@@ -87,19 +87,23 @@ data TxState  = Successful
     Both are needed, as trTimestap is the one the user is interested of knowing, while
     trLastUpdate is used for fetching those events
 -}
-data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw bhash = TxRow
-                                                                    { trHash          :: h
-                                                                    , trInputsAddr    :: iAddrs
-                                                                    , trInputsAmount  :: iAmts
-                                                                    , trOutputsAddr   :: oAddrs
-                                                                    , trOutputsAmount :: oAmts
-                                                                    , trBlockNum      :: bn
-                                                                    , trTimestamp     :: t
-                                                                    , trState         :: state
-                                                                    , trLastUpdate    :: last
-                                                                    , trRawBody       :: raw
-                                                                    , trBlockHash     :: bhash
-                                                                    } deriving (Show)
+data TxRowPoly h iAddrs iAmts oAddrs oAmts bn t state last raw bhash epoch slot ord =
+  TxRow
+  { trHash          :: h
+  , trInputsAddr    :: iAddrs
+  , trInputsAmount  :: iAmts
+  , trOutputsAddr   :: oAddrs
+  , trOutputsAmount :: oAmts
+  , trBlockNum      :: bn
+  , trTimestamp     :: t
+  , trState         :: state
+  , trLastUpdate    :: last
+  , trRawBody       :: raw
+  , trBlockHash     :: bhash
+  , trEpoch         :: epoch
+  , trSlot          :: slot
+  , trOrdinal       :: ord
+  } deriving (Show)
 
 type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
                           (Column (PGArray PGText))         -- Inputs addresses
@@ -112,6 +116,9 @@ type TxRowPG = TxRowPoly  (Column PGText)                   -- Tx hash
                           (Column PGTimestamptz)            -- Timestamp of the last update
                           (Column (Nullable PGText))        -- Raw TX body
                           (Column (Nullable PGText))        -- Block hash
+                          (Column (Nullable PGInt8))        -- Epoch
+                          (Column (Nullable PGInt8))        -- Slot
+                          (Column (Nullable PGInt8))        -- Ordinal
 
 $(makeAdaptorAndInstance "pTxs" ''TxRowPoly)
 
@@ -127,6 +134,9 @@ txsTable = Table "txs" (pTxs TxRow  { trHash            = required "hash"
                                     , trLastUpdate      = required "last_update"
                                     , trRawBody         = required "tx_body"
                                     , trBlockHash       = required "block_hash"
+                                    , trEpoch           = required "epoch"
+                                    , trSlot            = required "slot"
+                                    , trOrdinal         = required "ordinal"
                                     })
 
 
@@ -148,7 +158,7 @@ getTxByHash txHash conn = do
       pure $ TxRecord txHash inputs outputs blkNum time txState
     _ -> Nothing
     where txByHashQuery = proc () -> do
-            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ _ <- (selectTable txsTable) -< ()
+            TxRow rowTxHash inputsAddr inputsAmount outputsAddr outputsAmount blkNum t txState _ _ _ _ _ _ <- (selectTable txsTable) -< ()
             restrict -< rowTxHash .== (pgString $ hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
@@ -248,6 +258,9 @@ upsertTxToHistory tx TxExtra{..} blockHeightAndHash txState conn = do
                 , trState         = pgString $ show txState
                 , trLastUpdate    = pgUTCTime currentTime
                 , trRawBody       = toNullable . pgString. toString . serialize' $ tx
+                , trEpoch         = Opaleye.null
+                , trSlot          = Opaleye.null
+                , trOrdinal       = Opaleye.null
                 }
     timestampToPGTime = pgUTCTime . (^. timestampToUTCTimeL)
 
