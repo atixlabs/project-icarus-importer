@@ -83,9 +83,10 @@ eApplyToilPG isNewEpoch mTxTimestamp txun slot headerHash blockHeight = do
     applier (ordinal, (txAux, txUndo)) = do
         let tx = taTx txAux
             newExtra = TxExtra mTxTimestamp txUndo
-
+        let blockData = TxsT.TxBlockData {
+          blockHeight = blockHeight, blockHash = headerHash, txOrdinal = ordinal}
         postgresStoreOnBlockEvent isNewEpoch $
-                                  TxsT.upsertSuccessfulTx tx newExtra slot (blockHeight, headerHash) ordinal
+                                  TxsT.upsertSuccessfulTx tx newExtra slot blockData
 
 
 -- | Rollback transactions from one block or genesis.
