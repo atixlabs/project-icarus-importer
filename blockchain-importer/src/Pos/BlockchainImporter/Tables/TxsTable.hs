@@ -31,7 +31,7 @@ import           Opaleye.RunSelect
 import           Pos.BlockchainImporter.Core (TxExtra (..))
 import qualified Pos.BlockchainImporter.Tables.TxAddrTable as TAT (insertTxAddresses)
 import           Pos.BlockchainImporter.Tables.Utils
-import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL, HeaderHash, SlotId)
+import           Pos.Core (BlockCount, Timestamp, timestampToUTCTimeL, HeaderHash, SlotId (..))
 import           Pos.Core.Txp (Tx (..), TxId, TxOut (..), TxOutAux (..), TxUndo)
 import           Pos.Crypto (hash)
 import           Pos.Crypto.Hashing (AbstractHash (..))
@@ -163,6 +163,21 @@ getTxByHash txHash conn = do
             restrict -< rowTxHash .== (pgString $ hashToString txHash)
             A.returnA -< (rowTxHash, inputsAddr, inputsAmount, outputsAddr, outputsAmount, blkNum, t, txState)
 
+-- | Returns slot from a latest known tx or (0/0)
+getLatestSlot :: PGS.Connection -> IO SlotId
+getLatestSlot conn = do
+  slotsMatched :: [(Int, Int)] <- runSelect conn query
+  pure $ case slotsMatched of
+    [ (epoch, slot) ] -> createSlotId epoch slot
+    _ -> createSlotId 0 0
+  where query = proc () -> do
+          (e,s) <- limit 1 (orderBy (desc fst <> desc snd) $ proc () -> do
+            TxRow _ _ _ _ _ _ _ txState _ _ _ epoch slot _ <- selectTable txsTable -< ()
+            restrict -< txState .== show Successful
+            A.returnA  -< (epoch, slot)) -< ()
+          A.returnA -< (fromNullable 0 e, fromNullable 0 s)
+
+
 {-|
     Inserts a confirmed tx to the tx history table
     If the tx was already present with a different state, it is moved to the confirmed one and
@@ -180,7 +195,8 @@ upsertSuccessfulTx tx txExtra slot blockData =
 upsertFailedTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertFailedTx tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  upsertTx tx txExtra Nothing Nothing Failed conn
+  slot <- getLatestSlot conn
+  upsertTx tx txExtra (Just slot) Nothing Failed conn
 
 {-|
     Inserts a pending tx to the tx history table with the current time as it's timestamp
@@ -239,7 +255,8 @@ upsertTxToHistory :: Tx -> TxExtra-> Maybe SlotId -> Maybe TxBlockData -> TxStat
 upsertTxToHistory tx TxExtra{..} maybeSlot maybeBlockData txState conn = do
   currentTime <- getCurrentTime
   void $ runUpsert_ conn txsTable ["hash"]
-                    ["block_num", "block_hash", "tx_state", "last_update", "time"]
+                    ["block_num", "block_hash", "tx_state", "last_update",
+                     "time", "epoch", "slot", "ordinal"]
                     [rowFromLastUpdate currentTime]
   where
     inputs                        = toaOut <$> catMaybes (NE.toList teInputOutputs)

@@ -8,6 +8,7 @@ module Pos.BlockchainImporter.Tables.Utils
   , coinToInt64
   , slotToEpochInt
   , slotToSlotInt
+  , createSlotId
   , toTxIn
   , toTxOutAux
     -- * Postgres
@@ -52,6 +53,11 @@ slotToEpochInt = fromIntegral . getEpochIndex . siEpoch
 
 slotToSlotInt :: SlotId -> Int
 slotToSlotInt = fromIntegral . getSlotIndex . siSlot
+
+createSlotId :: Int -> Int -> SlotId
+createSlotId epoch slot = SlotId { siEpoch = e, siSlot = s }
+  where e = EpochIndex $ fromIntegral epoch
+        s = UnsafeLocalSlotIndex $ fromIntegral slot
 
 toTxOutAux :: Text -> Int64 -> Maybe TxOutAux
 toTxOutAux receiver amount = do

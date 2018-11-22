@@ -19,7 +19,7 @@ import           Universum
 import           Control.Monad.Except (mapExceptT)
 import qualified Database.PostgreSQL.Simple as PGS
 
-import           Pos.BlockchainImporter.Configuration (HasPostGresDB, postGreOperate)
+import           Pos.BlockchainImporter.Configuration (HasPostGresDB, postGreOperate, withPostGreTransaction)
 import           Pos.BlockchainImporter.Core (TxExtra (..))
 import qualified Pos.BlockchainImporter.Tables.BestBlockTable as BBT
 import qualified Pos.BlockchainImporter.Tables.TxsTable as TxsT
@@ -173,7 +173,7 @@ eNormalizeToil bvd curEpoch txs = catMaybes <$> mapM normalize ordered
 eFailedToil :: (MonadIO m, MonadDBRead m, HasPostGresDB) => Tx -> m ()
 eFailedToil tx = do
   inputs <- fetchTxSenders tx
-  liftIO $ postGreOperate $ TxsT.upsertFailedTx tx inputs
+  liftIO $ withPostGreTransaction . postGreOperate $ TxsT.upsertFailedTx tx inputs
 
 -- | Checks if a tx was successful
 eCheckSuccessfulToil :: (MonadIO m, MonadDBRead m, HasPostGresDB) => Tx -> m Bool
