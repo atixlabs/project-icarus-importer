@@ -182,10 +182,6 @@ getLatestSlot conn = do
     Inserts a confirmed tx to the tx history table
     If the tx was already present with a different state, it is moved to the confirmed one and
     it's timestamp and last update are updated.
-
-    Slot where successfull tx were included in the chain is required as the third
-    parameter. Additional `TxBlockData` providing information about the block
-    where the tx were included is also required.
 -}
 upsertSuccessfulTx :: Tx -> TxExtra -> TxBlockData -> PGS.Connection -> IO ()
 upsertSuccessfulTx tx txExtra blockData =
@@ -214,7 +210,7 @@ upsertFailedTx maybeSlot tx txUndo conn = do
 upsertPendingTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertPendingTx tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  upsertTx tx txExtra TxNoSlot Pending conn
+  upsertTx tx txExtra TxUnchained Pending conn
 
 {-|
     Marks all pending txs as failed
@@ -253,11 +249,6 @@ deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
 {-|
     Inserts a given Tx into the Tx history tables with a given state
     (overriding any it if it was already present).
-
-    Maybe slot might be optionally provided, pointign to the place in chain
-    there this tx historically correcponds to. And maybe additional TxBlockData
-    might be also specified, providing extra info about the block where tx
-    is included.
 -}
 upsertTx :: Tx -> TxExtra -> TxChainData -> TxState -> PGS.Connection -> IO ()
 upsertTx tx txExtra chainData succeeded conn = do
@@ -314,12 +305,19 @@ extractHash (AbstractHash h) = show h
 maybeOrNull :: (a -> Column b) -> Maybe a -> Column (Nullable b)
 maybeOrNull f = maybe Opaleye.null (toNullable . f)
 
-data TxChainData = TxSlot SlotId | TxBlock TxBlockData | TxNoSlot
-data TxBlockData = TxBlockData { slot        :: !SlotId
-                               , blockHeight :: !BlockCount
-                               , blockHash   :: !HeaderHash
-                               , txOrdinal   :: !Int
-                               }
+-- | Possible states of a tx relevance to the chain
+data TxChainData
+   = TxSlot SlotId -- tx is pegged to some slot
+   | TxBlock TxBlockData  -- tx is included in a block
+   | TxUnchained -- tx is not related to the chain
+
+-- | Extended properties of a tx being included in a block
+data TxBlockData
+   = TxBlockData { slot        :: !SlotId
+                 , blockHeight :: !BlockCount
+                 , blockHash   :: !HeaderHash
+                 , txOrdinal   :: !Int
+                 }
 
 extractChainData :: TxChainData -> (Maybe SlotId, Maybe BlockCount, Maybe HeaderHash, Maybe Int)
 extractChainData maybeChainData = case maybeChainData of
