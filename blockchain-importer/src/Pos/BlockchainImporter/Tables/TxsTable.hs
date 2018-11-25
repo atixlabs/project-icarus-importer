@@ -4,7 +4,7 @@ module Pos.BlockchainImporter.Tables.TxsTable
   ( -- * Data types
     TxRecord (..)
   , TxState (..)
-  , TxChainData (..)
+  , TxBlockData (..)
     -- * Getters
   , getTxByHash
     -- * Manipulation
@@ -187,9 +187,9 @@ getLatestSlot conn = do
     parameter. Additional `TxBlockData` providing information about the block
     where the tx were included is also required.
 -}
-upsertSuccessfulTx :: Tx -> TxExtra -> TxChainData -> PGS.Connection -> IO ()
+upsertSuccessfulTx :: Tx -> TxExtra -> TxBlockData -> PGS.Connection -> IO ()
 upsertSuccessfulTx tx txExtra blockData =
-   upsertTx tx txExtra (Just blockData) Successful
+   upsertTx tx txExtra (TxBlock blockData) Successful
 
 {-|
     Inserts a failed tx to the tx history table with the current time as it's timestamp
@@ -204,7 +204,7 @@ upsertFailedTx :: Maybe SlotId -> Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertFailedTx maybeSlot tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
   slot <- maybe (getLatestSlot conn) pure maybeSlot
-  upsertTx tx txExtra (Just (TxSlotData slot)) Failed conn
+  upsertTx tx txExtra (TxSlot slot) Failed conn
 
 {-|
     Inserts a pending tx to the tx history table with the current time as it's timestamp
@@ -214,7 +214,7 @@ upsertFailedTx maybeSlot tx txUndo conn = do
 upsertPendingTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertPendingTx tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  upsertTx tx txExtra Nothing Pending conn
+  upsertTx tx txExtra TxNoSlot Pending conn
 
 {-|
     Marks all pending txs as failed
@@ -259,15 +259,15 @@ deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
     might be also specified, providing extra info about the block where tx
     is included.
 -}
-upsertTx :: Tx -> TxExtra -> Maybe TxChainData -> TxState -> PGS.Connection -> IO ()
-upsertTx tx txExtra maybeChainData succeeded conn = do
-  upsertTxToHistory tx txExtra maybeChainData succeeded conn
+upsertTx :: Tx -> TxExtra -> TxChainData -> TxState -> PGS.Connection -> IO ()
+upsertTx tx txExtra chainData succeeded conn = do
+  upsertTxToHistory tx txExtra chainData succeeded conn
   TAT.insertTxAddresses tx (teInputOutputs txExtra) conn
 
 -- Inserts the basic info of a given Tx into the master Tx history table (overriding any
 -- it if it was already present)
-upsertTxToHistory :: Tx -> TxExtra-> Maybe TxChainData -> TxState -> PGS.Connection -> IO ()
-upsertTxToHistory tx TxExtra{..} maybeChainData txState conn = do
+upsertTxToHistory :: Tx -> TxExtra-> TxChainData -> TxState -> PGS.Connection -> IO ()
+upsertTxToHistory tx TxExtra{..} chainData txState conn = do
   currentTime <- getCurrentTime
   void $ runUpsert_ conn txsTable ["hash"]
                     ["block_num", "block_hash", "tx_state", "last_update",
@@ -276,7 +276,7 @@ upsertTxToHistory tx TxExtra{..} maybeChainData txState conn = do
   where
     inputs                        = toaOut <$> catMaybes (NE.toList teInputOutputs)
     outputs                       = NE.toList $ _txOutputs tx
-    (mSlot, mBlHeight, mBlHash, mTxOrd) = extractChainData maybeChainData
+    (mSlot, mBlHeight, mBlHash, mTxOrd) = extractChainData chainData
     rowFromLastUpdate currentTime =
           TxRow { trHash          = pgString $ hashToString (hash tx)
                 , trInputsAddr    = pgArray (pgString . addressToString . txOutAddress) inputs
@@ -314,16 +314,15 @@ extractHash (AbstractHash h) = show h
 maybeOrNull :: (a -> Column b) -> Maybe a -> Column (Nullable b)
 maybeOrNull f = maybe Opaleye.null (toNullable . f)
 
-data TxChainData
-  = TxSlotData { slot :: !SlotId }
-  | TxBlockData { slot        :: !SlotId
-                , blockHeight :: !BlockCount
-                , blockHash   :: !HeaderHash
-                , txOrdinal   :: !Int
-                } deriving (Show)
+data TxChainData = TxSlot SlotId | TxBlock TxBlockData | TxNoSlot
+data TxBlockData = TxBlockData { slot        :: !SlotId
+                               , blockHeight :: !BlockCount
+                               , blockHash   :: !HeaderHash
+                               , txOrdinal   :: !Int
+                               }
 
-extractChainData :: Maybe TxChainData -> (Maybe SlotId, Maybe BlockCount, Maybe HeaderHash, Maybe Int)
+extractChainData :: TxChainData -> (Maybe SlotId, Maybe BlockCount, Maybe HeaderHash, Maybe Int)
 extractChainData maybeChainData = case maybeChainData of
-    (Just TxSlotData{..}) -> (Just slot, Nothing, Nothing, Nothing)
-    (Just TxBlockData{..}) -> (Just slot, Just blockHeight, Just blockHash, Just txOrdinal)
+    TxSlot slot -> (Just slot, Nothing, Nothing, Nothing)
+    TxBlock TxBlockData{..} -> (Just slot, Just blockHeight, Just blockHash, Just txOrdinal)
     _ -> (Nothing, Nothing, Nothing, Nothing)
