@@ -192,10 +192,12 @@ upsertSuccessfulTx tx txExtra slot blockData =
     If the tx was already present with a different state, it is moved to the failed one and
     it's timestamp and last update are updated
 -}
-upsertFailedTx :: Tx -> TxUndo -> PGS.Connection -> IO ()
-upsertFailedTx tx txUndo conn = do
+upsertFailedTx :: Maybe SlotId -> Tx -> TxUndo -> PGS.Connection -> IO ()
+upsertFailedTx maybeSlot tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  slot <- getLatestSlot conn
+  slot <- case maybeSlot of
+    Just slot -> pure slot
+    Nothing -> getLatestSlot conn
   upsertTx tx txExtra (Just slot) Nothing Failed conn
 
 {-|

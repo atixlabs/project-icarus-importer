@@ -170,10 +170,10 @@ eNormalizeToil bvd curEpoch txs = catMaybes <$> mapM normalize ordered
     during it's processing. In that case, we attempt to obtain the inputs, returning them only
     if we successfully get all of them
 -}
-eFailedToil :: (MonadIO m, MonadDBRead m, HasPostGresDB) => Tx -> m ()
-eFailedToil tx = do
+eFailedToil :: (MonadIO m, MonadDBRead m, HasPostGresDB) => Maybe SlotId -> Tx -> m ()
+eFailedToil maybeSlot tx = do
   inputs <- fetchTxSenders tx
-  liftIO $ withPostGreTransaction . postGreOperate $ TxsT.upsertFailedTx tx inputs
+  liftIO $ withPostGreTransaction . postGreOperate $ TxsT.upsertFailedTx maybeSlot tx inputs
 
 -- | Checks if a tx was successful
 eCheckSuccessfulToil :: (MonadIO m, MonadDBRead m, HasPostGresDB) => Tx -> m Bool
