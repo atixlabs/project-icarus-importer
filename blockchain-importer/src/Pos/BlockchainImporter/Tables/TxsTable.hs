@@ -253,9 +253,9 @@ upsertTx tx txExtra chainData succeeded conn = do
   upsertTxToHistory tx txExtra chainData succeeded conn
   TAT.insertTxAddresses tx (teInputOutputs txExtra) conn
 
--- Inserts the basic info of a given Tx into the master Tx history table (overriding any
--- it if it was already present)
-upsertTxToHistory :: Tx -> TxExtra-> TxChainData -> TxState -> PGS.Connection -> IO ()
+-- Inserts the basic info of a given Tx into the master Tx history table
+-- (overriding any if it was already present)
+upsertTxToHistory :: Tx -> TxExtra -> TxChainData -> TxState -> PGS.Connection -> IO ()
 upsertTxToHistory tx TxExtra{..} chainData txState conn = do
   currentTime <- getCurrentTime
   void $ runUpsert_ conn txsTable ["hash"]
