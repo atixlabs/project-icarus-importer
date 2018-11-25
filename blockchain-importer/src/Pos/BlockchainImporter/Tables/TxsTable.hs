@@ -195,9 +195,7 @@ upsertSuccessfulTx tx txExtra slot blockData =
 upsertFailedTx :: Maybe SlotId -> Tx -> TxUndo -> PGS.Connection -> IO ()
 upsertFailedTx maybeSlot tx txUndo conn = do
   txExtra <- currentTxExtra txUndo
-  slot <- case maybeSlot of
-    Just slot -> pure slot
-    Nothing -> getLatestSlot conn
+  slot <- maybe (getLatestSlot conn) pure maybeSlot
   upsertTx tx txExtra (Just slot) Nothing Failed conn
 
 {-|
