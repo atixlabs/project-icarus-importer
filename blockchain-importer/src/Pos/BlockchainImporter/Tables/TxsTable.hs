@@ -173,7 +173,7 @@ getLatestSlot conn = do
   where query = proc () -> do
           (e,s) <- limit 1 (orderBy (desc fst <> desc snd) $ proc () -> do
             TxRow _ _ _ _ _ _ _ txState _ _ _ epoch slot _ <- selectTable txsTable -< ()
-            restrict -< txState .== show Successful
+            restrict -< txState .== pgString (show Successful)
             A.returnA  -< (epoch, slot)) -< ()
           A.returnA -< (fromNullable 0 e, fromNullable 0 s)
 
