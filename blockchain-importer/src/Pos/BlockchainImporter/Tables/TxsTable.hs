@@ -246,10 +246,8 @@ deleteTxsAfterBlk fromBlk conn = void $ runDelete_ conn deleteAfterBlkQuery
 -- Helpers
 ----------------------------------------------------------------------------
 
-{-|
-    Inserts a given Tx into the Tx history tables with a given state
-    (overriding any it if it was already present).
--}
+-- Inserts a given Tx into the Tx history tables with a given state
+-- (overriding any if it was already present).
 upsertTx :: Tx -> TxExtra -> TxChainData -> TxState -> PGS.Connection -> IO ()
 upsertTx tx txExtra chainData succeeded conn = do
   upsertTxToHistory tx txExtra chainData succeeded conn
