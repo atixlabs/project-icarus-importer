@@ -128,7 +128,7 @@ rollbackPostgresDB rollbackTo = do
   liftIO $ postGreOperate $ BestBlockT.updateBestBlock rollbackTo
 
   liftIO $ postGreOperate $ UtxosT.clearUtxos
-  kvUtxos <- nonGenesisRocksUtxos
+  kvUtxos <- getAllPotentiallyHugeUtxo
   liftIO $ postGreOperate $ UtxosT.applyModifierToUtxos $ utxoToModifier kvUtxos
 
   logInfo $ sformat ("Rollbacked postgres db to block "%build) rollbackTo
@@ -148,12 +148,6 @@ blkNumberToRollback rocksBestBlock postgresBestBlock =
                                    else 0
   where latestCommonBlk = min rocksBestBlock postgresBestBlock
         maxRollback = fromIntegral blkSecurityParam
-
-nonGenesisRocksUtxos :: RecoveryMode ctx m => m Utxo
-nonGenesisRocksUtxos = do
-  allKVUtxos <- getAllPotentiallyHugeUtxo
-  let genesisUtxos = unGenesisUtxo genesisUtxo
-  pure $ allKVUtxos \\ genesisUtxos
 
 rocksDBTipDifficulty :: RecoveryMode ctx m => m BlockCount
 rocksDBTipDifficulty = getChainDifficulty . view difficultyL <$> DB.getTipHeader
